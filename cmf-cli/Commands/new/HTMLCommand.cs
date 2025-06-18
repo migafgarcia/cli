@@ -11,6 +11,7 @@ using Cmf.CLI.Core;
 using Cmf.CLI.Core.Attributes;
 using Cmf.CLI.Core.Enums;
 using Cmf.CLI.Core.Objects;
+using Cmf.CLI.Core.Objects.CmfApp;
 using Cmf.CLI.Services;
 using Cmf.CLI.Utilities;
 using Microsoft.Extensions.DependencyInjection;
@@ -338,7 +339,7 @@ $@"{{
             var mesVersion = ExecutionContext.Instance.ProjectConfig.MESVersion;
 
             var schematicsVersion = ngxSchematicsVersion.ToString() ?? $"@release-{mesVersion.Major}{mesVersion.Minor}{mesVersion.Build}";
-            
+
             //After v11 we use Angular default routing
             var routing = mesVersion.Major >= 11 ? "true" : "false";
 
@@ -376,9 +377,6 @@ $@"{{
             rootPkgJson.scripts["serve"] = "cross-env NODE_OPTIONS=--max-old-space-size=8192 npm run start -- --host 0.0.0.0 --disable-host-check --port 7000";
             rootPkgJson.devDependencies["cross-env"] = "^7.0.3";
             rootPkgJson.devDependencies["jquery-ui"] = "1.13.2";
-            json = JsonConvert.SerializeObject(rootPkgJson, Formatting.Indented);
-            this.fileSystem.File.WriteAllText(rootPkgJsonPath, json);
-            Log.Verbose("Updated package.json");
 
             // build
             new BuildCommand(fileSystem).Execute(packageDir);
@@ -425,6 +423,40 @@ $@"{{
             configJsonStr = JsonConvert.SerializeObject(configJsonJson, Formatting.Indented);
             this.fileSystem.File.WriteAllText(configJsonPath, configJsonStr);
             Log.Verbose("Updated config.json");
+            
+            if (ExecutionContext.Instance.ProjectConfig.RepositoryType == RepositoryType.App)
+            {
+
+                IFileInfo cmfAppFile = fileSystem.FileInfo.New(CliConstants.CmfAppFileName);
+                if (!cmfAppFile.Exists)
+                {
+                    Log.Debug($"{CliConstants.CmfAppFileName} not found!");
+                    return;
+                }
+
+                string appFileContent = cmfAppFile.ReadToString();
+
+                var appData = JsonConvert.DeserializeObject<AppData>(appFileContent);
+
+                var appName = appData.id;
+
+                var servePathArgument = $" --allowed-hosts host.docker.internal --serve-path /apps/{appName}/";
+                rootPkgJson.scripts["serve"] += servePathArgument;
+
+                // index.html
+                var indexHtmlPath = this.fileSystem.Path.Join(packageDir.FullName, "src", "index.html");
+                var indexHtmlStr = fileSystem.File.ReadAllText(indexHtmlPath);
+
+                indexHtmlStr = Regex.Replace(indexHtmlStr, "<title>(.*?)</title>", $"<title>{appName}</title>");
+                indexHtmlStr = Regex.Replace(indexHtmlStr, "<base\\s+href=\"([^\"]*)\">", $"<base href=\"/apps/{appName}/\">");
+                this.fileSystem.File.WriteAllText(indexHtmlPath, indexHtmlStr);
+                Log.Verbose("Updated index.html");
+            }
+            
+            json = JsonConvert.SerializeObject(rootPkgJson, Formatting.Indented);
+            this.fileSystem.File.WriteAllText(rootPkgJsonPath, json);
+            Log.Verbose("Updated package.json");
+            
         }
     }
 }
